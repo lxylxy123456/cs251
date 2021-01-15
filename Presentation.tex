@@ -1,0 +1,496 @@
+\documentclass[mathserif,serif,14pt,aspectratio=169]{beamer}
+
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{shapes}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{multirow}
+\usepackage{eso-pic}
+\usepackage[inkscapepath=ICTPresentationSvg/]{svg}
+% \usepackage[cm-default]{fontspec}
+% \usepackage{xeCJK}
+\usepackage{ifthen}
+
+% \setCJKmainfont{Source Han Sans CN}
+% \setCJKmonofont{Source Han Sans CN}
+% \setmainfont{Liberation Sans}
+% \setmonofont{Courier 10 Pitch}
+\usepackage{tgtermes}
+\usepackage[T1]{fontenc}
+\usepackage{textpos}
+\usepackage{verbatim}
+
+\def\BibTeX{{\rmfamily B\kern-.05em
+\textsc{i\kern-.025em b}\kern-.08em
+T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\newcommand{\link}[1]{\href{#1}{#1}}
+
+\newcommand{\pic}[2]{
+	\centerline{\includegraphics[scale=#1]{#2}}
+}
+
+% \centerline{\includegraphics[scale=#1]{#2}} % 0/0
+
+\usepackage[backend=bibtex]{biblatex}
+\addbibresource{p2p.bib}
+
+\tikzset{grid/.style={gray,very thin,opacity=1}}	% 0/0
+
+\definecolor{Pink}{HTML}{ff0bff}
+\definecolor{Blue}{HTML}{0000ff}
+\definecolor{Green}{HTML}{008a8c}
+\definecolor{Brown}{HTML}{a52a2a}
+
+\lstset{
+	tabsize=4,
+	columns=fixed,
+	extendedchars=false,
+}
+
+\lstdefinestyle{cstyle}{
+	language=c++,
+	basicstyle=\ttfamily,
+	morekeywords={with},
+	keywordstyle=\bfseries\color{Brown},
+	commentstyle=\color{Blue},
+	stringstyle=\color{Pink},
+	keywordstyle=[3]\color{Green},
+	alsoletter={0123456789.},
+	morekeywords=[4]{0,1,2,100,999},
+	keywordstyle=[4]\color{Pink},
+	upquote=true,
+	breaklines=true,
+}
+
+\begin{document}
+
+\AddToShipoutPictureFG*{
+	\AtPageLowerLeft{
+		\put(\LenToUnit{0.7\paperwidth},\LenToUnit{0.1\paperheight}){
+			\begin{tikzpicture}
+				\definecolor{rxx}{HTML}{ff0000}
+				\definecolor{xgx}{HTML}{00ff00}
+				\definecolor{xxb}{HTML}{0000ff}
+				\definecolor{rgx}{HTML}{ffff00}
+				\definecolor{xgb}{HTML}{00ffff}
+				\definecolor{rxb}{HTML}{ff00ff}
+				\definecolor{rgb}{HTML}{ffffff}
+				\definecolor{xxx}{HTML}{000000}
+				\definecolor{xred}{RGB}{0, 255, 255}
+				\definecolor{xgreen}{RGB}{255, 0, 255}
+				\filldraw [color=rxx] (0, 1) rectangle (1, 2);
+				\filldraw [color=xgx] (1, 1) rectangle (2, 2);
+				\filldraw [color=xxb] (2, 1) rectangle (3, 2);
+				\filldraw [color=rgb] (1, 3) rectangle (2, 4);
+				\filldraw [color=rgx] (0, 2) rectangle (1, 3);
+				\filldraw [color=rxb] (1, 2) rectangle (2, 3);
+				\filldraw [color=xgb] (2, 2) rectangle (3, 3);
+				\filldraw [color=xxx] (1, 0) rectangle (2, 1);
+			\end{tikzpicture}
+		}
+	}
+}
+
+\begin{frame}
+	\centerline{\Large Implementing Synchronization Objects}
+	
+	\
+	
+	\centerline{Eric Li}
+	\centerline{Feb 4, 2021}
+\end{frame}
+
+% \AtBeginSection[]{
+% 	\begin{frame}
+% 		\frametitle{Table of Contents}
+% 		\tableofcontents[currentsection]
+% 	\end{frame}
+% }
+
+\section{Content}
+
+\begin{frame}
+	\frametitle{Overview}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<1-> Goal: implement locks and condition variables (CV)
+	\item<2-> We need to atomically modify states
+		\begin{itemize}\setlength\itemsep{0.3em}
+		\item<2-> Lock: FREE / BUSY; queue of waiting threads
+		\item<2-> CV: queue of waiting threads
+		\end{itemize}
+	\item<3-> Method: use hardware primitives
+		\begin{itemize}\setlength\itemsep{0.3em}
+		\item<3-> Disable interrupt (uniprocessor)
+		\item<3-> Atomic read-modify-write instructions (multiprocessor)
+		\end{itemize}
+	\item<4-> Kernel mode vs. user mode
+	\end{itemize}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Uniprocessor Locks: Disabling Interrupts}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<1-> No other processors can change memory
+	\item<1-> If no context switch, operations appear to be atomic
+	\item<2-> Trivial implementation
+		{
+		\small
+		\begin{lstlisting}[style=cstyle, gobble=8, frame=single, 
+							numbers=left, numberstyle=\ttfamily]
+		Lock::acquire() { disableInterrupts(); }
+		Lock::release() { enableInterrupts(); }
+		\end{lstlisting}
+		}
+	\item<3-> Problem
+		\begin{itemize}\setlength\itemsep{0.3em}
+		\item<3-> Disable interrupt for a long time (starvation, not real-time)
+		\item<3-> Cannot allow user-level code to disable interrupts
+		\end{itemize}
+	\end{itemize}
+\end{frame}
+
+\begin{frame}
+	\frametitle{Implementing Uniprocessor Queueing Locks}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<1-> Briefly disable interrupt to protect lock structure
+	\item<1-> When lock is locked, context switch to another ready thread
+	\end{itemize}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Implementing Uniprocessor Queueing Locks}
+	{
+	\fontsize{8}{8}\selectfont
+	\begin{columns}
+		\begin{column}{0.50\textwidth}
+		\begin{lstlisting}[style=cstyle, gobble=8, frame=single, 
+							numbers=left, numberstyle=\ttfamily]
+		Lock::acquire() {
+			TCB *chosenTCB;
+
+			disableInterrupts();
+			if (value == BUSY) {
+				waiting.add(runningThread);
+				runningThread->state = WAITING;
+				chosenTCB = readyList.remove();
+				thread_switch(runningThread,
+				              chosenTCB);
+				runningThread->state = RUNNING;
+			} else {
+				value = BUSY;
+			}
+			enableInterrupts();
+		}
+		\end{lstlisting}
+		\end{column}
+		\begin{column}{0.45\textwidth}
+		\begin{lstlisting}[style=cstyle, gobble=8, frame=single, 
+							numbers=left, numberstyle=\ttfamily]
+		Lock::release() {
+		// next thread to hold lock
+			TCB *next;
+
+			disableInterrupts();
+			if (waiting.notEmpty()) {
+			// move one TCB from waiting
+			// to ready
+				next = waiting.remove();
+				next->state = READY;
+				readyList.add(next);
+			} else {
+				value = FREE;
+			}
+			enableInterrupts();
+		}
+		\end{lstlisting}
+		\end{column}
+	\end{columns}
+	}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<2-> Do not set value = FREE in release() to prevent starvation
+		\begin{textblock}{2}[0,0](8,-4.5)
+			{\color{red} \textbf{-->}}	% TODO
+		\end{textblock}
+	\item<3-> During call to \lstinline{thread_switch}, interrupts are turned off
+		\begin{textblock}{2}[0,0](0.7,-7.2)
+			{\color{red} \textbf{-->}}	% TODO
+		\end{textblock}
+	\end{itemize}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Implementing Multiprocessor Spinlocks}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<1-> Cannot turn off interrupt
+	\item<1-> Use atomic read-modify-write instructions
+		\begin{itemize}\setlength\itemsep{0.3em}
+		\item<1-> Implementation: related to cache
+		\item<1-> Computer Architecture courses (ECS 154B / probably ECS 201)
+		\item<1->
+			\href{https://people.freebsd.org/~lstewart/articles/cpumemory.pdf
+				}{"What Every Programmer Should Know About Memory"}
+				Figure 3.18
+		\end{itemize}
+	\item<2-> Atomic test-and-set instruction
+		{
+		\small
+		\begin{lstlisting}[style=cstyle, gobble=8, frame=single, 
+							numbers=left, numberstyle=\ttfamily]
+		int test_and_set(int* lockPtr, int newValue) {
+			int oldValue;
+			oldValue = *lockPtr;
+			*lockPtr = newValue;
+			return oldValue;
+		}
+		\end{lstlisting}
+		}
+	\end{itemize}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Implementing Multiprocessor Spinlocks}
+	{
+	\fontsize{8}{8}\selectfont
+	\begin{lstlisting}[style=cstyle, gobble=4, frame=single, 
+						numbers=left, numberstyle=\ttfamily]
+	class SpinLock {
+	  private:
+		int value = 0; // 0 = FREE; 1 = BUSY
+
+	  public:
+		void acquire() {
+			while (test_and_set(&value)) // while BUSY
+			    ; // spin
+		}
+
+		void release() {
+			value = 0;
+			memory_barrier();
+		}
+	}
+	\end{lstlisting}
+	}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<2-> Busy wait (assume locks are only held shortly)
+		\begin{textblock}{2}[0,0](9.2,-6.4)
+			{\color{red} \textbf{<--}}	% TODO
+		\end{textblock}
+	\end{itemize}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Implementing Multiprocessor Queueing Locks}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<1-> Critical section length can be long
+	\item<1-> Minimize busy waiting
+	\item<2-> Class definitions
+		{
+		\fontsize{8}{8}\selectfont
+		\begin{lstlisting}[style=cstyle, gobble=8, frame=single, 
+							numbers=left, numberstyle=\ttfamily]
+		class Lock {
+		  private:
+			int value = FREE;
+			SpinLock spinLock;
+			Queue waiting;
+		  public:
+			void acquire();
+			void release();
+		}
+		class Scheduler {
+		  private:
+			Queue readyList;
+			SpinLock schedulerSpinLock;
+		  public:
+			void suspend(SpinLock *lock);
+			void makeReady(Thread *thread);
+		}
+		\end{lstlisting}
+		}
+	\end{itemize}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Implementing Uniprocessor Queueing Locks}
+	{
+	\fontsize{7}{7}\selectfont
+	\begin{columns}
+		\begin{column}{0.47\textwidth}
+		\lstinputlisting[style=cstyle, frame=single, 
+						numbers=left, numberstyle=\ttfamily]{574a.cpp}
+		\end{column}
+		\begin{column}{0.49\textwidth}
+		\lstinputlisting[style=cstyle, frame=single, 
+						numbers=left, numberstyle=\ttfamily]{574b.cpp}
+		\end{column}
+	\end{columns}
+	}
+	{
+	\fontsize{12}{12}\selectfont
+	\begin{itemize}
+	\item<2-> Suspending a thread
+		\begin{enumerate}
+		\fontsize{10}{10}\selectfont
+		\item<3-> Call scheduler.suspend without releasing Lock's spinLock
+			\begin{textblock}{2}[0,0](0.7,-10)
+				{\color{red} \textbf{-->}}	% TODO
+			\end{textblock}
+		\item<4-> disableInterrupts() to prevent thread being preempted
+			\begin{textblock}{2}[0,0](7.5,-11.6)
+				{\color{red} \textbf{-->}}	% TODO
+			\end{textblock}
+		\item<5-> Acquire Scheduler's spinLock to protect readyList
+			\begin{textblock}{2}[0,0](7.5,-11.7)
+				{\color{red} \textbf{-->}}	% TODO
+			\end{textblock}
+		\end{enumerate}
+	\end{itemize}
+	}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Implementing Uniprocessor Queueing Locks}
+	{
+	\fontsize{7}{7}\selectfont
+	\begin{columns}
+		\begin{column}{0.47\textwidth}
+		\lstinputlisting[style=cstyle, frame=single, 
+						numbers=left, numberstyle=\ttfamily]{574c.cpp}
+		\end{column}
+		\begin{column}{0.49\textwidth}
+		\lstinputlisting[style=cstyle, frame=single, 
+						numbers=left, numberstyle=\ttfamily]{574d.cpp}
+		\end{column}
+	\end{columns}
+	}
+	{
+	\fontsize{12}{12}\selectfont
+	\begin{itemize}
+	\item<1-> What if we release Lock's spinLock before calling scheduler.suspend?
+		\begin{enumerate}
+		\fontsize{10}{10}\selectfont
+		\item<2-> After release spinLock
+			\begin{textblock}{2}[0,0](0.7,-9.9)
+				{\color{red} \textbf{-->}}	% TODO
+			\end{textblock}
+		\item<3-> Another thread release lock, make this thread READY
+			\begin{textblock}{2}[0,0](7.5,-4.5)
+				{\color{red} \textbf{-->}}	% TODO
+			\end{textblock}
+		\item<4-> Current thread calls suspend(), state = WAITING forever
+			\begin{textblock}{2}[0,0](7.5,-10.8)
+				{\color{red} \textbf{-->}}	% TODO
+			\end{textblock}
+		\end{enumerate}
+	\end{itemize}
+	}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Linux 2.6 Kernel Mutex Lock}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<1-> Optimized for the common case
+	\item<1-> Assumption: most locks are FREE most of the time
+	\item<2-> Acquire: fast path when lock is not already acquired
+	\item<3-> Release: fast path when no waiters on the lock
+	\end{itemize}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Implementing Condition Variables}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<1-> Similar to implementing locks
+	\item<2-> Still, pass spinLock to scheduler.suspend
+		\begin{textblock}{2}[0,0](5.2,6.9)
+			{\color{red} \textbf{<--}}	% TODO
+		\end{textblock}
+	\end{itemize}
+	{
+	\fontsize{8}{8}\selectfont
+	\begin{columns}
+		\begin{column}{0.47\textwidth}
+		\begin{lstlisting}[style=cstyle, gobble=8, frame=single, 
+							numbers=left, numberstyle=\ttfamily]
+		class CV {
+		  private:
+			Queue waiting;
+		  public:
+			void wait(Lock *lock);
+			void signal();
+			void broadcast();
+		}
+
+		void CV::wait(Lock *lock) {
+			assert(lock.isHeld());
+			waiting.add(myTCB);
+			scheduler.suspend(&lock);
+			lock->acquire();
+		}
+		\end{lstlisting}
+		\end{column}
+		\begin{column}{0.47\textwidth}
+		\begin{lstlisting}[style=cstyle, gobble=8, frame=single, 
+							numbers=left, numberstyle=\ttfamily]
+		void CV::signal() {
+			if (waiting.notEmpty()) {
+				thread = waiting.remove();
+				scheduler.makeReady(thread);
+			}
+		}
+
+		void CV::broadcast() {
+			while (waiting.notEmpty()) {
+				thread = waiting.remove();
+				scheduler.makeReady(thread);
+			}
+		}
+		\end{lstlisting}
+		\end{column}
+	\end{columns}
+	}
+\end{frame}
+
+\begin{frame} [fragile]
+	\frametitle{Implementing Application-level Synchronization}
+	\begin{itemize}\setlength\itemsep{0.5em}
+	\item<1-> Kernel-Managed Threads
+		\begin{itemize}\setlength\itemsep{0.5em}
+		\item<1-> Simple case: place Lock and CV in kernel space, app use syscalls
+		\item<2-> Sophisticated case: fast path in user space, slow path in kernel
+		\end{itemize}
+	\item<3-> User-Managed Threads
+		\begin{itemize}\setlength\itemsep{0.5em}
+		\item Implement most things at user level
+		\item Disabling interrupts $\to$ temporarily disable upcalls
+			(usually supported by modern OS)
+		\end{itemize}
+	\end{itemize}
+\end{frame}
+
+\section{EOF}
+
+\AddToShipoutPictureFG*{
+	\AtPageLowerLeft{
+		\put(\LenToUnit{0.05\paperwidth},\LenToUnit{0.26\paperheight}){
+			Ref: Anderson \& Dahlin, Operating Systems - Principles and Practice
+		}
+		\put(\LenToUnit{0.05\paperwidth},\LenToUnit{0.18\paperheight}){
+			Ref: \url{https://en.wikipedia.org/wiki/Test-and-set}
+		}
+		\put(\LenToUnit{0.05\paperwidth},\LenToUnit{0.1\paperheight}){
+			Thanks: \LaTeX, Beamer, OBS
+		}
+	}
+}
+
+\begin{frame}
+	\centerline{\fontsize{32}{32}\selectfont Thank you}
+\end{frame}
+
+% Words: anonymity, reciprocity, proprietary
+
+\newpage
+\end{document}
+
