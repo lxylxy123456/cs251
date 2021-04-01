@@ -63,7 +63,7 @@ Lock::release() {
 ```
 
 ### Quiz question 2
-Do uni- or multi-processor implementation of queuing locks discussed in this presentation ("Implementing Synchronization Objects" by Eric Li) use disabling interrupts / atomic instructions?
+Do uni- or multi-processor implementation of queuing locks discussed in this presentation use disabling interrupts / atomic instructions?
 * uniprocessor _______ disabling interrupts
 * uniprocessor _______ atomic instructions
 * multiprocessor _______ disabling interrupts
